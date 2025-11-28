@@ -1,0 +1,526 @@
+<!-- @format -->
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Topological Sort Visualizer</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #f8fafc;
+        margin: 0;
+        padding: 20px;
+      }
+
+      h1 {
+        text-align: center;
+        font-size: 2rem;
+        color: #1e293b;
+      }
+
+      .container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        margin-top: 20px;
+      }
+
+      .panel {
+        background: white;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        padding: 20px;
+        flex: 1;
+        min-width: 300px;
+      }
+
+      .graph {
+        flex: 2;
+        position: relative;
+        min-height: 500px;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        background: #ffffff;
+        overflow: hidden;
+      }
+
+      input,
+      select,
+      button {
+        padding: 8px;
+        margin: 5px 0;
+        border: 1px solid #94a3b8;
+        border-radius: 5px;
+      }
+
+      button {
+        cursor: pointer;
+        background: #2563eb;
+        color: white;
+      }
+
+      button:hover {
+        background: #1d4ed8;
+      }
+
+      .node {
+        position: absolute;
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        text-align: center;
+        line-height: 60px;
+        font-weight: bold;
+        color: #1e293b;
+        border: 3px solid #1e293b;
+        transition: background 0.5s, transform 0.2s;
+        cursor: grab;
+        user-select: none;
+      }
+
+      .node:active {
+        cursor: grabbing;
+      }
+
+      .unvisited {
+        background: #94a3b8;
+      }
+
+      .processing {
+        background: #facc15;
+      }
+
+      .completed {
+        background: #22c55e;
+      }
+
+      svg {
+        position: absolute;
+        top: 0;
+        left: 0;
+      }
+
+      .legend {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        margin-top: 10px;
+      }
+
+      .legend div {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .color-box {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+      }
+
+      .status {
+        text-align: center;
+        font-weight: bold;
+        margin-top: 10px;
+      }
+
+      .order {
+        text-align: center;
+        margin-top: 15px;
+        font-size: 1.1rem;
+        color: #1e293b;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>Topological Sort Visualizer</h1>
+
+    <div class="container">
+      <div class="panel">
+        <h3>Step 1: Add Tasks</h3>
+        <input type="text" id="taskName" placeholder="Task name" />
+        <button onclick="addTask()">Add Task</button>
+
+        <h3>Step 2: Add Dependencies</h3>
+        <select id="fromNode">
+          <option value="">Task that must be done first</option>
+        </select>
+        <select id="toNode">
+          <option value="">Task that depends on it</option>
+        </select>
+        <button onclick="addDependency()">Add Dependency</button>
+
+        <h3>Step 3: Choose Algorithm</h3>
+        <label>
+          <input type="radio" name="algo" value="kahn" checked /> Kahn’s
+          Algorithm
+        </label>
+        <br />
+        <label>
+          <input type="radio" name="algo" value="dfs" /> DFS Algorithm
+        </label>
+        <br /><br />
+
+        <button onclick="runAlgorithm()">▶ Run</button>
+        <button onclick="reset()">🔄 Reset</button>
+        <button onclick="clearAll()" style="background: #dc2626">
+          🗑 Clear All
+        </button>
+
+        <h3>Dependencies:</h3>
+        <div id="dependencies"></div>
+      </div>
+
+      <div class="graph" id="graphArea">
+        <svg width="100%" height="100%" id="edgesSvg"></svg>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div>
+        <div class="color-box" style="background: #94a3b8"></div>
+        Unvisited
+      </div>
+      <div>
+        <div class="color-box" style="background: #facc15"></div>
+        Processing
+      </div>
+      <div>
+        <div class="color-box" style="background: #22c55e"></div>
+        Completed
+      </div>
+    </div>
+
+    <div class="status" id="statusText"></div>
+    <div class="order" id="finalOrder"></div>
+
+    <script>
+      let nodes = [];
+      let edges = [];
+      let steps = [];
+      let currentStep = 0;
+      let running = false;
+      let intervalId = null;
+      let order = [];
+
+      const graphArea = document.getElementById("graphArea");
+      const edgesSvg = document.getElementById("edgesSvg");
+      const statusText = document.getElementById("statusText");
+      const orderDiv = document.getElementById("finalOrder");
+      const arrowMarker = `
+    <defs>
+      <marker id="arrowhead" markerWidth="10" markerHeight="7" 
+              refX="10" refY="3.5" orient="auto">
+        <polygon points="0 0, 10 3.5, 0 7" fill="#334155"></polygon>
+      </marker>
+    </defs>`;
+      edgesSvg.innerHTML = arrowMarker;
+
+      function getNodePosition(index) {
+        const cols = 4;
+        const spacingX = 150;
+        const spacingY = 120;
+        const x = 120 + (index % cols) * spacingX;
+        const y = 100 + Math.floor(index / cols) * spacingY;
+        return { x, y };
+      }
+
+      function addTask() {
+        const name = document.getElementById("taskName").value.trim();
+        if (!name) return alert("Please enter a task name");
+        if (nodes.find((n) => n.id === name))
+          return alert("Task already exists");
+
+        const { x, y } = getNodePosition(nodes.length);
+        nodes.push({ id: name, x, y, state: "unvisited" });
+
+        updateNodeList();
+        renderGraph();
+        document.getElementById("taskName").value = "";
+      }
+
+      function updateNodeList() {
+        const fromSelect = document.getElementById("fromNode");
+        const toSelect = document.getElementById("toNode");
+        fromSelect.innerHTML =
+          '<option value="">Task that must be done first</option>';
+        toSelect.innerHTML =
+          '<option value="">Task that depends on it</option>';
+        nodes.forEach((n) => {
+          fromSelect.innerHTML += `<option value="${n.id}">${n.id}</option>`;
+          toSelect.innerHTML += `<option value="${n.id}">${n.id}</option>`;
+        });
+      }
+
+      function addDependency() {
+        const from = document.getElementById("fromNode").value;
+        const to = document.getElementById("toNode").value;
+        if (!from || !to) return alert("Please select both tasks");
+        if (from === to) return alert("A task cannot depend on itself");
+        if (edges.find((e) => e.from === from && e.to === to))
+          return alert("Dependency already exists");
+
+        edges.push({ from, to });
+        renderGraph();
+        renderDependencies();
+      }
+
+      function renderDependencies() {
+        const depDiv = document.getElementById("dependencies");
+        depDiv.innerHTML = edges
+          .map((e) => `${e.to} → depends on → ${e.from}`)
+          .join("<br>");
+      }
+
+      function renderGraph() {
+        graphArea.querySelectorAll(".node").forEach((n) => n.remove());
+        edgesSvg.innerHTML = arrowMarker;
+
+        edges.forEach((edge) => {
+          const fromNode = nodes.find((n) => n.id === edge.from);
+          const toNode = nodes.find((n) => n.id === edge.to);
+          if (!fromNode || !toNode) return;
+
+          const line = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "line"
+          );
+          line.setAttribute("x1", fromNode.x);
+          line.setAttribute("y1", fromNode.y);
+          line.setAttribute("x2", toNode.x);
+          line.setAttribute("y2", toNode.y);
+          line.setAttribute("stroke", "#334155");
+          line.setAttribute("stroke-width", "2.5");
+          line.setAttribute("marker-end", "url(#arrowhead)");
+          edgesSvg.appendChild(line);
+        });
+
+        nodes.forEach((node) => {
+          const div = document.createElement("div");
+          div.className = `node ${node.state}`;
+          div.style.left = node.x - 30 + "px";
+          div.style.top = node.y - 30 + "px";
+          div.innerText = node.id;
+          graphArea.appendChild(div);
+          makeDraggable(div, node);
+        });
+      }
+
+      function makeDraggable(element, node) {
+        let offsetX,
+          offsetY,
+          dragging = false;
+
+        element.addEventListener("mousedown", (e) => {
+          dragging = true;
+          offsetX = e.clientX - node.x;
+          offsetY = e.clientY - node.y;
+        });
+
+        document.addEventListener("mousemove", (e) => {
+          if (!dragging) return;
+          node.x = e.clientX - offsetX;
+          node.y = e.clientY - offsetY;
+          renderGraph();
+        });
+
+        document.addEventListener("mouseup", () => {
+          dragging = false;
+        });
+      }
+
+      function detectCycle() {
+        const adjList = {};
+        const visited = new Set();
+        const recStack = new Set();
+
+        nodes.forEach((n) => (adjList[n.id] = []));
+        edges.forEach((e) => adjList[e.from].push(e.to));
+
+        function dfs(nodeId) {
+          visited.add(nodeId);
+          recStack.add(nodeId);
+          for (const nei of adjList[nodeId]) {
+            if (!visited.has(nei)) {
+              if (dfs(nei)) return true;
+            } else if (recStack.has(nei)) return true;
+          }
+          recStack.delete(nodeId);
+          return false;
+        }
+
+        for (const node of nodes) {
+          if (!visited.has(node.id)) {
+            if (dfs(node.id)) return true;
+          }
+        }
+        return false;
+      }
+
+      function kahnAlgorithm() {
+        const adjList = {};
+        const inDegree = {};
+        const steps = [];
+        order = [];
+
+        nodes.forEach((n) => {
+          adjList[n.id] = [];
+          inDegree[n.id] = 0;
+        });
+
+        edges.forEach((e) => {
+          adjList[e.from].push(e.to);
+          inDegree[e.to]++;
+        });
+        const queue = nodes
+          .filter((n) => inDegree[n.id] === 0)
+          .map((n) => n.id);
+
+        while (queue.length > 0) {
+          const current = queue.shift();
+          steps.push({
+            nodeId: current,
+            state: "processing",
+            msg: "Processing",
+          });
+          steps.push({ nodeId: current, state: "completed", msg: "Completed" });
+          order.push(current);
+
+          for (const nei of adjList[current]) {
+            inDegree[nei]--;
+            if (inDegree[nei] === 0) {
+              queue.push(nei);
+            }
+          }
+        }
+        return steps;
+      }
+
+      function dfsAlgorithm() {
+        const adjList = {};
+        const visited = new Set();
+        const steps = [];
+        order = [];
+
+        nodes.forEach((n) => (adjList[n.id] = []));
+        edges.forEach((e) => adjList[e.from].push(e.to));
+
+        function dfs(nodeId) {
+          visited.add(nodeId);
+          steps.push({ nodeId, state: "processing", msg: "Visiting" });
+          for (const nei of adjList[nodeId]) {
+            if (!visited.has(nei)) dfs(nei);
+          }
+          steps.push({ nodeId, state: "completed", msg: "Completed" });
+          order.unshift(nodeId);
+        }
+
+        nodes.forEach((n) => {
+          if (!visited.has(n.id)) dfs(n.id);
+        });
+
+        return steps;
+      }
+
+      function runAlgorithm() {
+        if (nodes.length === 0) return alert("Add tasks first");
+        if (detectCycle()) return alert("Cycle detected! Cannot continue.");
+
+        const algo = document.querySelector('input[name="algo"]:checked').value;
+        steps = algo === "kahn" ? kahnAlgorithm() : dfsAlgorithm();
+        currentStep = 0;
+        running = true;
+
+        clearInterval(intervalId);
+        orderDiv.innerText = "";
+        intervalId = setInterval(() => {
+          if (currentStep >= steps.length) {
+            clearInterval(intervalId);
+            running = false;
+            statusText.innerText = "Algorithm Completed!";
+            renderFinalOrderVisual();
+            return;
+          }
+          const step = steps[currentStep];
+          const node = nodes.find((n) => n.id === step.nodeId);
+          if (node) node.state = step.state;
+          statusText.innerText = `Step ${currentStep + 1}/${steps.length}: ${
+            step.msg
+          } - ${step.nodeId}`;
+          renderGraph();
+          currentStep++;
+        }, 1200);
+      }
+
+      function renderFinalOrderVisual() {
+        orderDiv.innerHTML = `<h3>Topological Order:</h3>`;
+        if (order.length === 0) {
+          orderDiv.innerHTML += "No valid order found.";
+          return;
+        }
+
+        const container = document.createElement("div");
+        container.style.display = "flex";
+        container.style.justifyContent = "center";
+        container.style.alignItems = "center";
+        container.style.flexWrap = "wrap";
+        container.style.gap = "10px";
+        container.style.marginTop = "15px";
+
+        order.forEach((id, index) => {
+          const box = document.createElement("div");
+          box.innerText = id;
+          box.style.padding = "10px 18px";
+          box.style.border = "2px solid #334155";
+          box.style.borderRadius = "10px";
+          box.style.fontWeight = "bold";
+          box.style.background = "#22c55e";
+          box.style.color = "#fff";
+          box.style.fontSize = "1rem";
+          container.appendChild(box);
+
+          if (index < order.length - 1) {
+            const arrow = document.createElement("span");
+            arrow.innerText = "→";
+            arrow.style.fontSize = "1.5rem";
+            arrow.style.color = "#334155";
+            container.appendChild(arrow);
+          }
+        });
+
+        orderDiv.appendChild(container);
+      }
+
+      function reset() {
+        clearInterval(intervalId);
+        currentStep = 0;
+        steps = [];
+        running = false;
+        nodes.forEach((n) => (n.state = "unvisited"));
+        statusText.innerText = "";
+        orderDiv.innerText = "";
+        renderGraph();
+      }
+
+      function clearAll() 
+      {
+        clearInterval(intervalId);
+        nodes = [];
+        edges = [];
+        steps = [];
+        currentStep = 0;
+        running = false;
+        order = [];
+        statusText.innerText = "";
+        orderDiv.innerText = "";
+        renderGraph();
+        updateNodeList();
+        renderDependencies();
+      }
+    </script>
+  </body>
+</html>
